@@ -1,6 +1,6 @@
 """
 Tiered Milestone Money Management & Discipline Tracker
-Fixed: Custom starting capital keeps absolute tier stakes (e.g. $500 account → $100 stake).
+Production-ready Streamlit app — strict original rules + proportional scaling.
 """
 
 import streamlit as st
@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Tuple
 import copy
 
 # =============================================================================
-# PAGE CONFIG & THEME
+# PAGE CONFIG & DARK TRADING TERMINAL THEME
 # =============================================================================
 st.set_page_config(
     page_title="Tiered Milestone Tracker",
@@ -27,10 +27,8 @@ st.markdown("""
 
     .hero-card {
         background: linear-gradient(135deg, #1a1f2e 0%, #0f1419 100%);
-        border: 1px solid #2a3441;
-        border-radius: 12px;
-        padding: 1.5rem 2rem;
-        margin-bottom: 1.5rem;
+        border: 1px solid #2a3441; border-radius: 12px;
+        padding: 1.5rem 2rem; margin-bottom: 1.5rem;
         box-shadow: 0 4px 20px rgba(0,0,0,0.4);
     }
     .hero-balance {
@@ -82,7 +80,6 @@ st.markdown("""
         border-radius: 10px; padding: 1rem;
     }
     div[data-testid="stMetric"] label { color: #8B9CB3 !important; }
-
     .stButton > button { border-radius: 8px; font-weight: 600; }
     section[data-testid="stSidebar"] { background-color: #0b0e14; border-right: 1px solid #1e2530; }
     hr { border-color: #2a3441 !important; }
@@ -90,83 +87,132 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =============================================================================
-# TIER DEFINITIONS – absolute values from your screenshots
-# These NEVER scale. Custom capital only changes the starting balance.
+# BASE TIERS ($10 system) — scaled in Proportional mode
 # =============================================================================
-TIERS = [
+BASE_TIERS = [
     {
         "key": "emergency",
-        "name": "Emergency",
+        "name": "Emergency Mode",
         "min_balance": 0.0,
         "max_balance": 4.99,
         "stake": 1.0,
+        "risk_pct": 25.0,
         "allows_house_money": False,
-        "description": "Below $5 → $1 stake until recover to $10",
     },
     {
-        "key": "startup",
-        "name": "Start-up ($10)",
+        "key": "tier1",
+        "name": "Tier 1",
         "min_balance": 5.0,
         "max_balance": 29.99,
         "stake": 5.0,
+        "risk_pct": 50.0,
         "allows_house_money": False,
-        "description": "$10 capital · $5 / trade · 1 trade/day only",
     },
     {
-        "key": "m30",
-        "name": "Milestone $30",
+        "key": "tier2",
+        "name": "Tier 2",
         "min_balance": 30.0,
         "max_balance": 59.99,
         "stake": 10.0,
+        "risk_pct": 33.3,
         "allows_house_money": False,
-        "description": "$10 / trade · 1 trade/day only",
     },
     {
-        "key": "m60",
-        "name": "Milestone $60",
+        "key": "tier3",
+        "name": "Tier 3",
         "min_balance": 60.0,
         "max_balance": 99.99,
         "stake": 20.0,
+        "risk_pct": 33.3,
         "allows_house_money": False,
-        "description": "$20 / trade · 1 trade/day only",
     },
     {
-        "key": "m100",
-        "name": "Milestone $100",
+        "key": "tier4",
+        "name": "Tier 4",
         "min_balance": 100.0,
         "max_balance": 199.99,
         "stake": 25.0,
+        "risk_pct": 25.0,
         "allows_house_money": True,
-        "description": "$25 / trade · optional house-money chain",
     },
     {
-        "key": "m200",
-        "name": "Milestone $200",
+        "key": "tier5",
+        "name": "Tier 5",
         "min_balance": 200.0,
         "max_balance": 499.99,
         "stake": 30.0,
+        "risk_pct": 15.0,
         "allows_house_money": True,
-        "description": "$30 / trade · optional house-money chain",
     },
     {
-        "key": "m500",
-        "name": "Milestone $500",
+        "key": "tier6",
+        "name": "Tier 6",
         "min_balance": 500.0,
         "max_balance": float("inf"),
         "stake": 100.0,
+        "risk_pct": 20.0,
         "allows_house_money": True,
-        "description": "$100 / trade · optional house-money chain",
     },
 ]
 
-MILESTONE_THRESHOLDS = [30.0, 60.0, 100.0, 200.0, 500.0]
+BASE_MILESTONES = [30.0, 60.0, 100.0, 200.0, 500.0]
 
 
-def get_current_tier(balance: float) -> Dict:
-    for t in TIERS:
+def get_scale(mode: str, custom_capital: float) -> float:
+    if mode == "Proportional Scaling Mode" and custom_capital > 0:
+        return custom_capital / 10.0
+    return 1.0
+
+
+def build_tiers(scale: float) -> List[Dict]:
+    tiers = []
+    for t in BASE_TIERS:
+        nt = copy.deepcopy(t)
+        nt["min_balance"] = round(t["min_balance"] * scale, 2)
+        nt["max_balance"] = (
+            float("inf") if t["max_balance"] == float("inf")
+            else round(t["max_balance"] * scale, 2)
+        )
+        nt["stake"] = round(t["stake"] * scale, 2)
+
+        # Dynamic display names & descriptions
+        if t["key"] == "emergency":
+            nt["name"] = "Emergency Mode"
+            nt["description"] = (
+                f"Below ${5*scale:.0f} → stake ${nt['stake']:.0f} "
+                f"until recover to ${10*scale:.0f} | Risk ~{t['risk_pct']}%"
+            )
+        elif t["key"] == "tier1":
+            nt["name"] = f"Tier 1 (${10*scale:.0f} Base)"
+            nt["description"] = (
+                f"${10*scale:.0f} start · ${nt['stake']:.0f}/trade · "
+                f"Risk {t['risk_pct']}% · 1 trade/day only"
+            )
+        elif t["key"] == "tier2":
+            nt["name"] = f"Tier 2 (${30*scale:.0f})"
+            nt["description"] = f"${nt['stake']:.0f}/trade · Risk {t['risk_pct']}% · 1 trade/day only"
+        elif t["key"] == "tier3":
+            nt["name"] = f"Tier 3 (${60*scale:.0f})"
+            nt["description"] = f"${nt['stake']:.0f}/trade · Risk {t['risk_pct']}% · 1 trade/day only"
+        elif t["key"] == "tier4":
+            nt["name"] = f"Tier 4 (${100*scale:.0f})"
+            nt["description"] = f"${nt['stake']:.0f}/trade · Risk {t['risk_pct']}% · optional house-money"
+        elif t["key"] == "tier5":
+            nt["name"] = f"Tier 5 (${200*scale:.0f})"
+            nt["description"] = f"${nt['stake']:.0f}/trade · Risk {t['risk_pct']}% · optional house-money"
+        elif t["key"] == "tier6":
+            nt["name"] = f"Tier 6 (${500*scale:.0f}+)"
+            nt["description"] = f"${nt['stake']:.0f}/trade · Risk {t['risk_pct']}% · optional house-money"
+
+        tiers.append(nt)
+    return tiers
+
+
+def get_current_tier(balance: float, tiers: List[Dict]) -> Dict:
+    for t in tiers:
         if t["min_balance"] <= balance <= t["max_balance"]:
             return t
-    return TIERS[-1]
+    return tiers[-1]
 
 
 def potential_profit(stake: float, payout_rate: float) -> float:
@@ -195,8 +241,9 @@ def init_session_state():
 
 
 def reset_account():
-    start_bal = float(st.session_state.custom_capital) if st.session_state.mode == "Custom Starting Capital Mode" else 10.0
-    st.session_state.balance = start_bal
+    scale = get_scale(st.session_state.mode, st.session_state.custom_capital)
+    start = round(10.0 * scale, 2)
+    st.session_state.balance = start
     st.session_state.trade_history = []
     st.session_state.daily_trades = 0
     st.session_state.last_trade_date = None
@@ -204,8 +251,8 @@ def reset_account():
     st.session_state.house_money_active = False
     st.session_state.next_house_stake = 0.0
     st.session_state.notifications = []
-    st.session_state.starting_balance_of_day = start_bal
-    st.session_state.equity_curve = [{"date": date.today().isoformat(), "balance": start_bal}]
+    st.session_state.starting_balance_of_day = start
+    st.session_state.equity_curve = [{"date": date.today().isoformat(), "balance": start}]
     st.success("Account & settings reset successfully.")
 
 
@@ -219,8 +266,8 @@ def check_new_day():
         st.session_state.starting_balance_of_day = st.session_state.balance
 
 
-def get_recommended_stake(balance: float) -> Tuple[float, Dict, bool]:
-    tier = get_current_tier(balance)
+def get_recommended_stake(balance: float, tiers: List[Dict]) -> Tuple[float, Dict, bool]:
+    tier = get_current_tier(balance, tiers)
     if st.session_state.house_money_active and st.session_state.next_house_stake > 0:
         return round(st.session_state.next_house_stake, 2), tier, True
     return tier["stake"], tier, False
@@ -229,6 +276,8 @@ def get_recommended_stake(balance: float) -> Tuple[float, Dict, bool]:
 def record_trade(result: str, pl_amount: Optional[float] = None):
     check_new_day()
     today = date.today().isoformat()
+    scale = get_scale(st.session_state.mode, st.session_state.custom_capital)
+    tiers = build_tiers(scale)
     payout = st.session_state.payout_rate
 
     if st.session_state.day_locked:
@@ -239,8 +288,8 @@ def record_trade(result: str, pl_amount: Optional[float] = None):
         return
 
     balance_before = st.session_state.balance
-    tier_before = get_current_tier(balance_before)
-    stake, active_tier, is_house = get_recommended_stake(balance_before)
+    tier_before = get_current_tier(balance_before, tiers)
+    stake, active_tier, is_house = get_recommended_stake(balance_before, tiers)
 
     if result == "WIN":
         profit = pl_amount if (pl_amount is not None and pl_amount > 0) else potential_profit(stake, payout)
@@ -267,10 +316,12 @@ def record_trade(result: str, pl_amount: Optional[float] = None):
     })
     st.session_state.equity_curve.append({"date": today, "balance": balance_after})
 
-    tier_after = get_current_tier(balance_after)
+    tier_after = get_current_tier(balance_after, tiers)
 
+    # ---- Discipline rules ----
     if result == "WIN":
         if active_tier["allows_house_money"]:
+            # ≥ $100 (scaled): optional house-money chain
             next_stake = round(profit * 0.5, 2)
             st.session_state.house_money_active = True
             st.session_state.next_house_stake = next_stake
@@ -279,46 +330,61 @@ def record_trade(result: str, pl_amount: Optional[float] = None):
                 "type": "house",
                 "msg": (
                     f"WIN (+${profit:.2f}). "
-                    f"Optional next trade available using 50% of this profit → stake ${next_stake:.2f}. "
-                    f"Take it or press End Trading Day to stop."
+                    f"Optional next trade available at 50% of this profit → stake ${next_stake:.2f}. "
+                    f"Take it or End Trading Day to exit until tomorrow."
                 ),
             })
         else:
+            # < $100 (scaled): strict 1 trade/day → lock
             st.session_state.day_locked = True
             st.session_state.house_money_active = False
             st.session_state.next_house_stake = 0.0
             st.session_state.notifications.append({
                 "type": "win",
-                "msg": f"WIN (+${profit:.2f}). Rule: 1 Win per day → EXIT THE MARKET. Return tomorrow.",
+                "msg": (
+                    f"WIN (+${profit:.2f}). "
+                    f"MANDATORY MARKET EXIT: 1 Win per day rule. Return tomorrow."
+                ),
             })
     else:
+        # Any LOSS → lock day
         st.session_state.day_locked = True
         st.session_state.house_money_active = False
         st.session_state.next_house_stake = 0.0
         st.session_state.notifications.append({
             "type": "loss",
-            "msg": f"LOSS (${abs(profit):.2f}). Rule: 1 Loss per day → EXIT THE MARKET. No revenge trading.",
+            "msg": (
+                f"LOSS (${abs(profit):.2f}). "
+                f"MANDATORY MARKET EXIT: No revenge trading. Return tomorrow."
+            ),
         })
 
+    # Step-down / Level-up
     if tier_after["name"] != tier_before["name"]:
         if balance_after < balance_before:
             st.session_state.notifications.append({
                 "type": "stepdown",
                 "msg": (
-                    f"STEP-DOWN: Now on {tier_after['name']} (stake ${tier_after['stake']:.2f}). "
-                    f"Repeat strategy until you reach the higher milestone again."
+                    f"STEP-DOWN: {tier_before['name']} → {tier_after['name']}. "
+                    f"Next stake = ${tier_after['stake']:.2f}."
                 ),
             })
         else:
             st.session_state.notifications.append({
                 "type": "levelup",
-                "msg": f"LEVEL-UP: Reached {tier_after['name']}! New stake = ${tier_after['stake']:.2f}.",
+                "msg": (
+                    f"LEVEL-UP: {tier_before['name']} → {tier_after['name']}. "
+                    f"Next stake = ${tier_after['stake']:.2f}."
+                ),
             })
 
-    if balance_after < 5.0:
+    if balance_after < 5.0 * scale:
         st.session_state.notifications.append({
             "type": "stepdown",
-            "msg": "Emergency: Balance below $5. Stake fixed at $1 until you recover to $10.",
+            "msg": (
+                f"Emergency Mode: Balance below ${5*scale:.0f}. "
+                f"Stake = ${1*scale:.0f} until recover to ${10*scale:.0f}."
+            ),
         })
 
 
@@ -328,7 +394,7 @@ def end_trading_day():
     st.session_state.next_house_stake = 0.0
     st.session_state.notifications.append({
         "type": "lock",
-        "msg": "Trading day ended. Terminal locked until tomorrow.",
+        "msg": "Trading day ended manually. Terminal locked until tomorrow.",
     })
 
 
@@ -380,7 +446,7 @@ def compute_analytics(history: List[Dict], current_balance: float, start_balance
     }
 
 
-def build_equity_chart(equity_curve: List[Dict]) -> go.Figure:
+def build_equity_chart(equity_curve: List[Dict], scale: float) -> go.Figure:
     if not equity_curve:
         fig = go.Figure()
         fig.update_layout(template="plotly_dark", paper_bgcolor="#0E1117", plot_bgcolor="#0E1117")
@@ -397,10 +463,11 @@ def build_equity_chart(equity_curve: List[Dict]) -> go.Figure:
     ))
 
     colors = ["#FFB800", "#FF8C00", "#FF6B6B", "#A855F7", "#3B82F6"]
-    for i, m in enumerate(MILESTONE_THRESHOLDS):
+    for i, m in enumerate(BASE_MILESTONES):
+        scaled = round(m * scale, 2)
         fig.add_hline(
-            y=m, line_dash="dot", line_color=colors[i % len(colors)],
-            annotation_text=f"${m:.0f}", annotation_position="right",
+            y=scaled, line_dash="dot", line_color=colors[i % len(colors)],
+            annotation_text=f"${scaled:.0f}", annotation_position="right",
             annotation_font_color=colors[i % len(colors)],
         )
 
@@ -422,8 +489,10 @@ def main():
     init_session_state()
     check_new_day()
 
-    current_tier = get_current_tier(st.session_state.balance)
-    stake, _, is_house = get_recommended_stake(st.session_state.balance)
+    scale = get_scale(st.session_state.mode, st.session_state.custom_capital)
+    tiers = build_tiers(scale)
+    current_tier = get_current_tier(st.session_state.balance, tiers)
+    stake, _, is_house = get_recommended_stake(st.session_state.balance, tiers)
     pot_profit = potential_profit(stake, st.session_state.payout_rate)
 
     # ------------------------------------------------------------------
@@ -435,10 +504,9 @@ def main():
 
         mode = st.radio(
             "Operating Mode",
-            ["Standard Fixed Tier Mode", "Custom Starting Capital Mode"],
+            ["Standard Fixed Tier Mode", "Proportional Scaling Mode"],
             index=0 if st.session_state.mode == "Standard Fixed Tier Mode" else 1,
             key="mode_selector",
-            help="Custom Starting Capital lets you begin at any balance. Tier stakes stay exactly as in your rules.",
         )
 
         if mode != st.session_state.mode:
@@ -447,8 +515,8 @@ def main():
                 st.session_state.custom_capital = 10.0
                 st.session_state.balance = 10.0
             else:
-                # Keep whatever custom capital is set, apply it as starting balance
-                st.session_state.balance = float(st.session_state.custom_capital)
+                new_scale = st.session_state.custom_capital / 10.0
+                st.session_state.balance = round(10.0 * new_scale, 2)
             st.session_state.starting_balance_of_day = st.session_state.balance
             st.session_state.equity_curve = [{"date": date.today().isoformat(), "balance": st.session_state.balance}]
             st.session_state.trade_history = []
@@ -458,20 +526,21 @@ def main():
             st.session_state.next_house_stake = 0.0
             st.rerun()
 
-        if st.session_state.mode == "Custom Starting Capital Mode":
+        if st.session_state.mode == "Proportional Scaling Mode":
             custom = st.number_input(
-                "Starting Capital ($)",
-                min_value=1.0,
+                "Custom Starting Capital ($)",
+                min_value=10.0,
                 value=float(st.session_state.custom_capital),
                 step=10.0,
-                help="Set any starting balance. Tier stakes stay fixed (e.g. $500 account → $100 stake).",
+                help="Scales ALL milestones and stakes from the $10 base. Example: $1,000 = 100× scale.",
                 key="custom_cap_input",
             )
             if abs(custom - st.session_state.custom_capital) > 0.01:
+                new_scale = custom / 10.0
                 st.session_state.custom_capital = custom
-                st.session_state.balance = custom
-                st.session_state.starting_balance_of_day = custom
-                st.session_state.equity_curve = [{"date": date.today().isoformat(), "balance": custom}]
+                st.session_state.balance = round(10.0 * new_scale, 2)
+                st.session_state.starting_balance_of_day = st.session_state.balance
+                st.session_state.equity_curve = [{"date": date.today().isoformat(), "balance": st.session_state.balance}]
                 st.session_state.trade_history = []
                 st.session_state.daily_trades = 0
                 st.session_state.day_locked = False
@@ -489,14 +558,14 @@ def main():
         st.session_state.payout_rate = payout
 
         st.markdown("---")
-        st.markdown("### Your Rules (Fixed Stakes)")
-        st.caption("**Start $10** → stake **$5**")
-        st.caption("**Reach $30** → stake **$10**")
-        st.caption("**Reach $60** → stake **$20**")
-        st.caption("**Reach $100** → stake **$25** + house-money")
-        st.caption("**Reach $200** → stake **$30** + house-money")
-        st.caption("**Reach $500** → stake **$100** + house-money")
-        st.caption("**Below $5** → stake **$1** until $10")
+        st.markdown("### Tier Reference (Current Scale)")
+        st.caption(f"**Start** ${10*scale:.0f} → stake **${5*scale:.0f}** (Tier 1)")
+        st.caption(f"**${30*scale:.0f}–${60*scale-0.01:.0f}** → stake **${10*scale:.0f}** (Tier 2)")
+        st.caption(f"**${60*scale:.0f}–${100*scale-0.01:.0f}** → stake **${20*scale:.0f}** (Tier 3)")
+        st.caption(f"**${100*scale:.0f}–${200*scale-0.01:.0f}** → stake **${25*scale:.0f}** + house $")
+        st.caption(f"**${200*scale:.0f}–${500*scale-0.01:.0f}** → stake **${30*scale:.0f}** + house $")
+        st.caption(f"**${500*scale:.0f}+** → stake **${100*scale:.0f}** + house $")
+        st.caption(f"**Below ${5*scale:.0f}** → stake **${1*scale:.0f}** until ${10*scale:.0f}")
 
         st.markdown("---")
         if st.button("🔄 Reset Account & Settings", use_container_width=True):
@@ -504,16 +573,16 @@ def main():
             st.rerun()
 
         st.markdown("---")
-        st.caption("High-risk model. Only trade with money you can afford to lose.")
+        st.caption("High-risk model (15%–50% per trade). Only use capital you can afford to lose.")
 
     # ------------------------------------------------------------------
-    # HEADER
+    # HEADER + NOTIFICATIONS
     # ------------------------------------------------------------------
     st.markdown(
         "<h1 style='margin-bottom:0.2rem;'>📈 Tiered Milestone Money Manager</h1>",
         unsafe_allow_html=True,
     )
-    st.caption("1 trade/day rule · Optional house-money chain on $100+ · Automatic step-down")
+    st.caption("1 trade/day · Optional house-money chain on Tier 4+ · Automatic step-down / level-up")
 
     for note in st.session_state.notifications[-4:]:
         ntype = note["type"]
@@ -536,10 +605,10 @@ def main():
     st.markdown("### 🖥️ Today's Trade Terminal")
 
     if st.session_state.day_locked:
-        allowance = "Day Locked – Return Tomorrow"
+        allowance = "0/1 – Day Locked"
         allowance_color = "#FFB800"
     elif st.session_state.house_money_active:
-        allowance = f"Optional House-Money Trade · Stake ${stake:.2f}"
+        allowance = "Optional House Money Trade Available"
         allowance_color = "#FFB800"
     else:
         remaining = max(0, 1 - st.session_state.daily_trades)
@@ -584,9 +653,9 @@ def main():
         )
     elif st.session_state.house_money_active:
         st.markdown(
-            f'<div class="banner-house">💰 Optional next trade ready '
+            f'<div class="banner-house">💰 Optional house-money trade ready '
             f'(50% of previous profit = ${stake:.2f}). '
-            f'Take it or press “End Trading Day” to stop.</div>',
+            f'Take it or press End Trading Day to stop.</div>',
             unsafe_allow_html=True,
         )
 
@@ -596,7 +665,7 @@ def main():
         pl_input = st.number_input(
             "Actual P/L Amount (optional)",
             value=0.0, step=0.01,
-            help="Leave 0 to auto-calculate from stake × payout. Positive = win, negative = loss.",
+            help="Leave 0 to auto-calc from stake × payout. Positive = win, negative = loss.",
             disabled=not can_trade,
             key="pl_input",
         )
@@ -646,8 +715,8 @@ def main():
 
     st.markdown(
         '<div class="banner-warning">'
-        "⚠️ <b>HIGH-RISK WARNING</b>: This system uses large single-trade risk (especially early tiers). "
-        "Only use capital you can afford to lose. Strict 1-trade-per-day discipline is mandatory on smaller accounts."
+        "⚠️ <b>HIGH-RISK WARNING</b>: This model uses 15%–50% single-trade risk. "
+        "Designed for high-risk accounts only. Never risk money you cannot afford to lose."
         "</div>",
         unsafe_allow_html=True,
     )
@@ -655,13 +724,11 @@ def main():
     st.markdown("---")
 
     # ------------------------------------------------------------------
-    # ANALYTICS
+    # ANALYTICS & HISTORY
     # ------------------------------------------------------------------
     st.markdown("### 📊 Analytics & History")
 
-    original_start = 10.0
-    if st.session_state.mode == "Custom Starting Capital Mode":
-        original_start = float(st.session_state.custom_capital)
+    original_start = round(10.0 * scale, 2)
     if st.session_state.trade_history:
         original_start = st.session_state.trade_history[0]["starting_balance"]
 
@@ -677,7 +744,10 @@ def main():
     m4.metric("Current Streak", f"{abs(streak_val)} {'W' if streak_val >= 0 else 'L'}")
     m5.metric("Max Drawdown", f"{metrics['max_drawdown']}%")
 
-    st.plotly_chart(build_equity_chart(st.session_state.equity_curve), use_container_width=True)
+    st.plotly_chart(
+        build_equity_chart(st.session_state.equity_curve, scale),
+        use_container_width=True,
+    )
 
     st.markdown("#### Complete Trade History")
     if st.session_state.trade_history:
@@ -708,7 +778,7 @@ def main():
         st.info("No trades recorded yet. Execute your first trade above.")
 
     st.markdown("---")
-    st.caption("Tiered Milestone Money Manager · Matches your exact rules.")
+    st.caption("Tiered Milestone Money Manager · Strict original rules + proportional scaling.")
 
 
 if __name__ == "__main__":
